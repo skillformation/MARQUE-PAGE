@@ -303,25 +303,47 @@
             content.innerHTML = `
                 <div class="flex justify-between items-center mb-6">
                     <h1 class="text-2xl font-bold">Ma bibliothèque</h1>
-                    <button onclick="showAddBook()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
-                        Ajouter un livre
-                    </button>
+                    <div class="flex items-center space-x-3">
+                        <div class="flex bg-gray-200 rounded-lg p-1">
+                            <button onclick="toggleView('list')" id="listViewBtn" 
+                                    class="px-3 py-1 rounded text-sm transition-colors ${currentView === 'list' ? 'bg-white shadow' : 'text-gray-600'}">
+                                📄 Liste
+                            </button>
+                            <button onclick="toggleView('gallery')" id="galleryViewBtn" 
+                                    class="px-3 py-1 rounded text-sm transition-colors ${currentView === 'gallery' ? 'bg-white shadow' : 'text-gray-600'}">
+                                🖼️ Galerie
+                            </button>
+                        </div>
+                        <button onclick="showAddBook()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                            Ajouter un livre
+                        </button>
+                    </div>
                 </div>
 
                 <div class="bg-white rounded-lg shadow mb-6 p-4">
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <input type="text" id="searchBooks" placeholder="Rechercher..." 
-                               class="px-3 py-2 border rounded" onkeyup="searchBooks()">
-                        <select id="filterStatus" class="px-3 py-2 border rounded" onchange="searchBooks()">
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                        <input type="text" id="searchBooks" placeholder="Rechercher par titre ou auteur..." 
+                               class="px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500" 
+                               onkeyup="debounceSearch()" onchange="searchBooks()">
+                        <select id="filterStatus" class="px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500" onchange="searchBooks()">
                             <option value="">Tous les statuts</option>
                             <option value="to_read">À lire</option>
                             <option value="reading">En cours</option>
                             <option value="completed">Terminé</option>
                         </select>
-                        <input type="text" id="filterGenre" placeholder="Genre..." 
-                               class="px-3 py-2 border rounded" onkeyup="searchBooks()">
-                        <button onclick="searchBooks()" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700">
-                            Filtrer
+                        <input type="text" id="filterGenre" placeholder="Filtrer par genre..." 
+                               class="px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500" 
+                               onkeyup="debounceSearch()" onchange="searchBooks()">
+                        <select id="sortBooks" class="px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500" onchange="applySorting()">
+                            <option value="created_desc">Plus récents</option>
+                            <option value="created_asc">Plus anciens</option>
+                            <option value="title_asc">Titre A-Z</option>
+                            <option value="title_desc">Titre Z-A</option>
+                            <option value="author_asc">Auteur A-Z</option>
+                            <option value="author_desc">Auteur Z-A</option>
+                        </select>
+                        <button onclick="clearFilters()" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700">
+                            Réinitialiser
                         </button>
                     </div>
                 </div>
@@ -329,100 +351,188 @@
                 <div id="booksList" class="bg-white rounded-lg shadow">
                     <div class="p-6">Chargement...</div>
                 </div>
+                
+                <div id="pagination" class="mt-6 flex justify-center">
+                    <!-- Pagination sera ajoutée ici -->
+                </div>
             `;
             
             loadBooks();
         }
 
+        // Variables de pagination
+        let currentPage = 1;
+        let totalPages = 1;
+        let paginationData = null;
+
         // Fonction pour charger et afficher les livres
-        async function loadBooks() {
+        async function loadBooks(page = 1) {
             try {
                 const token = localStorage.getItem('token');
-                const response = await fetch('/api/books', {
+                const response = await fetch(`/api/books?page=${page}&per_page=12`, {
                     headers: { 'Authorization': 'Bearer ' + token }
                 });
                 const result = await response.json();
                 
-                const container = document.getElementById('booksList');
                 if (result.success) {
-                    const books = result.data.data;
-                    if (books.length > 0) {
-                        container.innerHTML = `
-                            <div class="divide-y">
-                                ${books.map(book => `
-                                    <div class="p-6 hover:bg-gray-50">
-                                        <div class="flex items-start space-x-4">
-                                            <div class="w-20 h-28 bg-gray-200 rounded flex-shrink-0">
-                                                ${book.cover_image ? 
-                                                    '<img src="/storage/' + book.cover_image + '" class="w-full h-full object-cover rounded">' : 
-                                                    '<div class="w-full h-full flex items-center justify-center text-xs text-gray-500">Pas d\'image</div>'
-                                                }
-                                            </div>
-                                            <div class="flex-1">
-                                                <h3 class="text-lg font-semibold">${book.title}</h3>
-                                                <p class="text-gray-600">par ${book.author}</p>
-                                                <p class="text-sm text-gray-500 mt-1">
-                                                    ${book.genre || 'Genre non spécifié'} 
-                                                    ${book.total_pages ? '• ' + book.total_pages + ' pages' : ''}
-                                                </p>
-                                                ${book.summary ? '<p class="text-sm text-gray-700 mt-2">' + book.summary.substring(0, 150) + '...</p>' : ''}
-                                                
-                                                ${book.total_pages ? `
-                                                    <div class="mt-3">
-                                                        <div class="flex items-center justify-between text-sm text-gray-600 mb-1">
-                                                            <span>Progression</span>
-                                                            <span>${book.current_page || 0}/${book.total_pages} pages (${Math.min(100, Math.round(((book.current_page || 0) / book.total_pages) * 100))}%)</span>
-                                                        </div>
-                                                        <div class="w-full bg-gray-200 rounded-full h-2 mb-2">
-                                                            <div class="bg-blue-600 h-2 rounded-full" style="width: ${Math.min(100, Math.round(((book.current_page || 0) / book.total_pages) * 100))}%"></div>
-                                                        </div>
-                                                        <div class="flex items-center space-x-2">
-                                                            <input type="number" id="progress_${book.id}" value="${book.current_page || 0}" min="0" max="${book.total_pages}" 
-                                                                   class="w-20 px-2 py-1 text-sm border rounded focus:ring-1 focus:ring-blue-500" 
-                                                                   placeholder="Page">
-                                                            <button onclick="updateProgress(${book.id})" class="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700">
-                                                                Mettre à jour
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                ` : ''}
-                                                
-                                                <div class="flex items-center justify-between mt-4">
-                                                    <span class="inline-block px-3 py-1 text-sm rounded ${getStatusColor(book.status)}">
-                                                        ${getStatusText(book.status)}
-                                                    </span>
-                                                    <div class="space-x-2">
-                                                        <button onclick="editBook(${book.id})" class="text-blue-600 hover:underline text-sm">
-                                                            Modifier
-                                                        </button>
-                                                        <button onclick="deleteBook(${book.id})" class="text-red-600 hover:underline text-sm">
-                                                            Supprimer
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        `;
-                    } else {
-                        container.innerHTML = `
-                            <div class="p-12 text-center">
-                                <p class="text-gray-500 mb-4">Aucun livre dans votre bibliothèque</p>
-                                <button onclick="showAddBook()" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">
-                                    Ajouter votre premier livre
-                                </button>
-                            </div>
-                        `;
-                    }
+                    displayBooks(result.data.data);
+                    
+                    // Gérer les données de pagination
+                    paginationData = result.data;
+                    currentPage = result.data.current_page;
+                    totalPages = result.data.last_page;
+                    displayPagination();
                 } else {
-                    container.innerHTML = '<div class="p-6 text-red-500">Erreur lors du chargement</div>';
+                    document.getElementById('booksList').innerHTML = '<div class="p-6 text-red-500">Erreur lors du chargement</div>';
                 }
             } catch (error) {
                 console.error('Erreur:', error);
                 document.getElementById('booksList').innerHTML = '<div class="p-6 text-red-500">Erreur lors du chargement</div>';
             }
+        }
+
+        // Variables globales pour la vue
+        let currentView = localStorage.getItem('viewMode') || 'list'; // 'list' ou 'gallery'
+        let allBooks = [];
+
+        // Fonction pour afficher les livres selon le mode de vue
+        function displayBooks(books) {
+            allBooks = books;
+            const container = document.getElementById('booksList');
+            
+            if (books.length === 0) {
+                container.innerHTML = `
+                    <div class="p-12 text-center">
+                        <p class="text-gray-500 mb-4">Aucun livre trouvé</p>
+                        <button onclick="showAddBook()" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">
+                            Ajouter votre premier livre
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+
+            if (currentView === 'gallery') {
+                displayGalleryView(books, container);
+            } else {
+                displayListView(books, container);
+            }
+        }
+
+        // Vue liste (actuelle)
+        function displayListView(books, container) {
+            container.innerHTML = `
+                <div class="divide-y">
+                    ${books.map(book => `
+                        <div class="p-6 hover:bg-gray-50">
+                            <div class="flex items-start space-x-4">
+                                <div class="w-20 h-28 bg-gray-200 rounded flex-shrink-0">
+                                    ${book.cover_image ? 
+                                        '<img src="/storage/' + book.cover_image + '" class="w-full h-full object-cover rounded">' : 
+                                        '<div class="w-full h-full flex items-center justify-center text-xs text-gray-500">Pas d\'image</div>'
+                                    }
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="text-lg font-semibold">${book.title}</h3>
+                                    <p class="text-gray-600">par ${book.author}</p>
+                                    <p class="text-sm text-gray-500 mt-1">
+                                        ${book.genre || 'Genre non spécifié'} 
+                                        ${book.total_pages ? '• ' + book.total_pages + ' pages' : ''}
+                                    </p>
+                                    ${book.summary ? '<p class="text-sm text-gray-700 mt-2">' + book.summary.substring(0, 150) + (book.summary.length > 150 ? '...' : '') + '</p>' : ''}
+                                    
+                                    ${book.total_pages ? `
+                                        <div class="mt-3">
+                                            <div class="flex items-center justify-between text-sm text-gray-600 mb-1">
+                                                <span>Progression</span>
+                                                <span>${book.current_page || 0}/${book.total_pages} pages (${Math.min(100, Math.round(((book.current_page || 0) / book.total_pages) * 100))}%)</span>
+                                            </div>
+                                            <div class="w-full bg-gray-200 rounded-full h-2 mb-2">
+                                                <div class="bg-blue-600 h-2 rounded-full" style="width: ${Math.min(100, Math.round(((book.current_page || 0) / book.total_pages) * 100))}%"></div>
+                                            </div>
+                                            <div class="flex items-center space-x-2">
+                                                <input type="number" id="progress_${book.id}" value="${book.current_page || 0}" min="0" max="${book.total_pages}" 
+                                                       class="w-20 px-2 py-1 text-sm border rounded focus:ring-1 focus:ring-blue-500" 
+                                                       placeholder="Page">
+                                                <button onclick="updateProgress(${book.id})" class="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700">
+                                                    Mettre à jour
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                    
+                                    <div class="flex items-center justify-between mt-4">
+                                        <span class="inline-block px-3 py-1 text-sm rounded ${getStatusColor(book.status)}">
+                                            ${getStatusText(book.status)}
+                                        </span>
+                                        <div class="space-x-2">
+                                            <button onclick="editBook(${book.id})" class="text-blue-600 hover:underline text-sm">
+                                                Modifier
+                                            </button>
+                                            <button onclick="deleteBook(${book.id})" class="text-red-600 hover:underline text-sm">
+                                                Supprimer
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // Vue galerie
+        function displayGalleryView(books, container) {
+            container.innerHTML = `
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-4">
+                    ${books.map(book => `
+                        <div class="bg-white rounded-lg shadow hover:shadow-lg transition-shadow duration-200 overflow-hidden">
+                            <div class="aspect-[2/3] bg-gray-200 relative">
+                                ${book.cover_image ? 
+                                    '<img src="/storage/' + book.cover_image + '" class="w-full h-full object-cover">' : 
+                                    '<div class="w-full h-full flex items-center justify-center text-xs text-gray-500 text-center p-2">Pas d\'image</div>'
+                                }
+                                <div class="absolute top-2 right-2">
+                                    <span class="inline-block px-2 py-1 text-xs rounded ${getStatusColor(book.status)}">
+                                        ${getStatusText(book.status)}
+                                    </span>
+                                </div>
+                                ${book.total_pages ? `
+                                    <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-2">
+                                        <div class="w-full bg-white/20 rounded-full h-1">
+                                            <div class="bg-white h-1 rounded-full" style="width: ${Math.min(100, Math.round(((book.current_page || 0) / book.total_pages) * 100))}%"></div>
+                                        </div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                            <div class="p-3">
+                                <h4 class="font-medium text-sm truncate" title="${book.title}">${book.title}</h4>
+                                <p class="text-xs text-gray-600 truncate" title="${book.author}">par ${book.author}</p>
+                                ${book.total_pages ? `
+                                    <div class="mt-2 flex items-center space-x-1">
+                                        <input type="number" id="progress_gallery_${book.id}" value="${book.current_page || 0}" min="0" max="${book.total_pages}" 
+                                               class="w-12 px-1 py-0.5 text-xs border rounded" 
+                                               title="Page actuelle">
+                                        <span class="text-xs text-gray-500">/${book.total_pages}</span>
+                                        <button onclick="updateProgress(${book.id}, true)" class="px-2 py-0.5 text-xs bg-green-600 text-white rounded hover:bg-green-700" title="Mettre à jour">
+                                            ↑
+                                        </button>
+                                    </div>
+                                ` : ''}
+                                <div class="mt-2 flex justify-between">
+                                    <button onclick="editBook(${book.id})" class="text-blue-600 hover:underline text-xs" title="Modifier">
+                                        ✏️
+                                    </button>
+                                    <button onclick="deleteBook(${book.id})" class="text-red-600 hover:underline text-xs" title="Supprimer">
+                                        🗑️
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
         }
 
         // Fonction pour afficher le formulaire d'ajout de livre
@@ -603,10 +713,100 @@
             location.reload();
         }
 
-        // Fonction de recherche (placeholder)
-        function searchBooks() {
-            // Implémentation de la recherche à développer
-            loadBooks();
+        // Fonction de recherche avancée avec pagination
+        async function searchBooks(page = 1) {
+            const search = document.getElementById('searchBooks')?.value || '';
+            const status = document.getElementById('filterStatus')?.value || '';
+            const genre = document.getElementById('filterGenre')?.value || '';
+            
+            try {
+                const token = localStorage.getItem('token');
+                const params = new URLSearchParams();
+                
+                params.append('page', page);
+                params.append('per_page', 12);
+                
+                if (search.trim()) params.append('search', search.trim());
+                if (status) params.append('status', status);
+                if (genre.trim()) params.append('genre', genre.trim());
+                
+                const url = `/api/books?${params.toString()}`;
+                const response = await fetch(url, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayBooks(result.data.data);
+                    
+                    // Gérer les données de pagination pour la recherche
+                    paginationData = result.data;
+                    currentPage = result.data.current_page;
+                    totalPages = result.data.last_page;
+                    displaySearchPagination();
+                } else {
+                    displayBooks([]);
+                }
+                
+            } catch (error) {
+                console.error('Erreur lors de la recherche:', error);
+                document.getElementById('booksList').innerHTML = '<div class="p-6 text-red-500">Erreur lors de la recherche</div>';
+            }
+        }
+
+        // Fonction de pagination spécifique pour la recherche
+        function displaySearchPagination() {
+            const paginationContainer = document.getElementById('pagination');
+            if (!paginationContainer || totalPages <= 1) {
+                if (paginationContainer) paginationContainer.innerHTML = '';
+                return;
+            }
+
+            let paginationHTML = '<div class="flex items-center space-x-2">';
+            
+            // Bouton Précédent
+            if (currentPage > 1) {
+                paginationHTML += `
+                    <button onclick="searchBooks(${currentPage - 1})" 
+                            class="px-3 py-2 border rounded hover:bg-gray-100">
+                        ← Précédent
+                    </button>
+                `;
+            }
+            
+            // Pages (simplifiée pour la recherche)
+            for (let i = Math.max(1, currentPage - 2); i <= Math.min(totalPages, currentPage + 2); i++) {
+                paginationHTML += `
+                    <button onclick="searchBooks(${i})" 
+                            class="px-3 py-2 border rounded ${i === currentPage ? 'bg-blue-600 text-white' : 'hover:bg-gray-100'}">
+                        ${i}
+                    </button>
+                `;
+            }
+            
+            // Bouton Suivant
+            if (currentPage < totalPages) {
+                paginationHTML += `
+                    <button onclick="searchBooks(${currentPage + 1})" 
+                            class="px-3 py-2 border rounded hover:bg-gray-100">
+                        Suivant →
+                    </button>
+                `;
+            }
+            
+            paginationHTML += '</div>';
+            
+            // Informations de pagination
+            if (paginationData) {
+                paginationHTML += `
+                    <div class="text-sm text-gray-600 mt-2 text-center">
+                        ${paginationData.total} résultat(s) trouvé(s)
+                    </div>
+                `;
+            }
+            
+            paginationContainer.innerHTML = paginationHTML;
         }
 
         async function editBook(bookId) {
@@ -777,8 +977,146 @@
             }
         }
 
-        async function updateProgress(bookId) {
-            const currentPage = document.getElementById(`progress_${bookId}`).value;
+        // Fonction pour afficher la pagination
+        function displayPagination() {
+            const paginationContainer = document.getElementById('pagination');
+            if (!paginationContainer || totalPages <= 1) {
+                if (paginationContainer) paginationContainer.innerHTML = '';
+                return;
+            }
+
+            let paginationHTML = '<div class="flex items-center space-x-2">';
+            
+            // Bouton Précédent
+            if (currentPage > 1) {
+                paginationHTML += `
+                    <button onclick="loadBooks(${currentPage - 1})" 
+                            class="px-3 py-2 border rounded hover:bg-gray-100">
+                        ← Précédent
+                    </button>
+                `;
+            }
+            
+            // Pages
+            const startPage = Math.max(1, currentPage - 2);
+            const endPage = Math.min(totalPages, currentPage + 2);
+            
+            if (startPage > 1) {
+                paginationHTML += `
+                    <button onclick="loadBooks(1)" 
+                            class="px-3 py-2 border rounded hover:bg-gray-100">1</button>
+                `;
+                if (startPage > 2) {
+                    paginationHTML += '<span class="px-2">...</span>';
+                }
+            }
+            
+            for (let i = startPage; i <= endPage; i++) {
+                paginationHTML += `
+                    <button onclick="loadBooks(${i})" 
+                            class="px-3 py-2 border rounded ${i === currentPage ? 'bg-blue-600 text-white' : 'hover:bg-gray-100'}">
+                        ${i}
+                    </button>
+                `;
+            }
+            
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    paginationHTML += '<span class="px-2">...</span>';
+                }
+                paginationHTML += `
+                    <button onclick="loadBooks(${totalPages})" 
+                            class="px-3 py-2 border rounded hover:bg-gray-100">${totalPages}</button>
+                `;
+            }
+            
+            // Bouton Suivant
+            if (currentPage < totalPages) {
+                paginationHTML += `
+                    <button onclick="loadBooks(${currentPage + 1})" 
+                            class="px-3 py-2 border rounded hover:bg-gray-100">
+                        Suivant →
+                    </button>
+                `;
+            }
+            
+            paginationHTML += '</div>';
+            
+            // Ajouter les informations de pagination
+            if (paginationData) {
+                paginationHTML += `
+                    <div class="text-sm text-gray-600 mt-2 text-center">
+                        Affichage de ${((currentPage - 1) * 12) + 1} à ${Math.min(currentPage * 12, paginationData.total)} 
+                        sur ${paginationData.total} livre(s)
+                    </div>
+                `;
+            }
+            
+            paginationContainer.innerHTML = paginationHTML;
+        }
+
+        // Fonctions pour la gestion des vues et filtres
+        function toggleView(viewType) {
+            currentView = viewType;
+            localStorage.setItem('viewMode', viewType);
+            
+            // Mettre à jour l'apparence des boutons
+            document.getElementById('listViewBtn').className = 
+                `px-3 py-1 rounded text-sm transition-colors ${viewType === 'list' ? 'bg-white shadow' : 'text-gray-600'}`;
+            document.getElementById('galleryViewBtn').className = 
+                `px-3 py-1 rounded text-sm transition-colors ${viewType === 'gallery' ? 'bg-white shadow' : 'text-gray-600'}`;
+            
+            // Réafficher les livres avec la nouvelle vue
+            displayBooks(allBooks);
+        }
+
+        // Debounce pour la recherche en temps réel
+        let searchTimeout;
+        function debounceSearch() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(searchBooks, 300);
+        }
+
+        // Fonction pour réinitialiser les filtres
+        function clearFilters() {
+            document.getElementById('searchBooks').value = '';
+            document.getElementById('filterStatus').value = '';
+            document.getElementById('filterGenre').value = '';
+            document.getElementById('sortBooks').value = 'created_desc';
+            loadBooks();
+        }
+
+        // Fonction de tri local
+        function applySorting() {
+            const sortValue = document.getElementById('sortBooks').value;
+            let sortedBooks = [...allBooks];
+            
+            switch(sortValue) {
+                case 'title_asc':
+                    sortedBooks.sort((a, b) => a.title.localeCompare(b.title));
+                    break;
+                case 'title_desc':
+                    sortedBooks.sort((a, b) => b.title.localeCompare(a.title));
+                    break;
+                case 'author_asc':
+                    sortedBooks.sort((a, b) => a.author.localeCompare(b.author));
+                    break;
+                case 'author_desc':
+                    sortedBooks.sort((a, b) => b.author.localeCompare(a.author));
+                    break;
+                case 'created_asc':
+                    sortedBooks.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                    break;
+                default: // created_desc
+                    sortedBooks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            }
+            
+            displayBooks(sortedBooks);
+        }
+
+        async function updateProgress(bookId, isGallery = false) {
+            const inputId = isGallery ? `progress_gallery_${bookId}` : `progress_${bookId}`;
+            const currentPage = document.getElementById(inputId).value;
             
             if (!currentPage || currentPage < 0) {
                 alert('Veuillez entrer un numéro de page valide');
